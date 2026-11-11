@@ -765,6 +765,7 @@ class DeferrableLoad:
     deadline_at: datetime | None = None
     start_at: datetime | None = None
     end_at: datetime | None = None
+    hard_start: bool = False
     battery_lockout_windows: tuple[tuple[datetime, datetime], ...] = ()
     semi_continuous: bool = True
     single_constant: bool = False

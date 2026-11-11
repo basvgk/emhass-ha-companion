@@ -133,6 +133,106 @@ def test_absolute_window_alone_becomes_indices():
 
 
 @pytest.mark.usefixtures("stockholm_timezone")
+def test_hard_absolute_start_uses_ceiling_at_timestep_boundary():
+    grid = datetime(2026, 7, 28, 17, 59, 59, tzinfo=UTC)
+    window = resolve_load_window(
+        name="EV",
+        earliest=None,
+        latest=None,
+        deadline=None,
+        grid_start=grid,
+        step=timedelta(minutes=15),
+        horizon_steps=48,
+        start_at=datetime(2026, 7, 28, 18, 0, tzinfo=UTC),
+        end_at=datetime(2026, 7, 29, 7, 0, tzinfo=UTC),
+        hard_start=True,
+    )
+    assert window.start_index == 1
+
+
+@pytest.mark.parametrize(
+    ("grid", "window_start", "window_end", "expected"),
+    [
+        # Fall-back repeats the local 02:00 hour. The dated window spans two
+        # elapsed UTC hours despite both ends having the same local date.
+        (
+            datetime(2027, 10, 31, 0, 0, tzinfo=UTC),
+            datetime(2027, 10, 31, 0, 30, tzinfo=UTC),
+            datetime(2027, 10, 31, 2, 30, tzinfo=UTC),
+            (2, 10),
+        ),
+        # Spring-forward skips local 02:00-02:59; elapsed time remains one UTC hour.
+        (
+            datetime(2027, 3, 28, 0, 0, tzinfo=UTC),
+            datetime(2027, 3, 28, 1, 30, tzinfo=UTC),
+            datetime(2027, 3, 28, 2, 30, tzinfo=UTC),
+            (6, 10),
+        ),
+    ],
+)
+def test_dated_window_uses_elapsed_time_across_dst(grid, window_start, window_end, expected):
+    window = resolve_load_window(
+        name="Scheduled load",
+        earliest=None,
+        latest=None,
+        deadline=None,
+        grid_start=grid,
+        step=timedelta(minutes=15),
+        horizon_steps=96,
+        start_at=window_start,
+        end_at=window_end,
+        hard_start=True,
+    )
+    assert (window.start_index, window.end_index) == expected
+
+
+@pytest.mark.usefixtures("stockholm_timezone")
+def test_expired_absolute_window_is_parked():
+    grid = datetime(2026, 7, 28, 18, 0, tzinfo=UTC)
+    result = build_payload(
+        _inputs(
+            now=grid,
+            time_step_minutes=15,
+            horizon_steps=48,
+            loads=[
+                DeferrableLoad(
+                    subentry_id="expired",
+                    name="Expired",
+                    nominal_power_w=2000,
+                    operating_hours=1,
+                    start_at=grid - timedelta(hours=2),
+                    end_at=grid - timedelta(minutes=1),
+                )
+            ],
+        )
+    )
+    assert result.payload["operating_hours_of_each_deferrable_load"] == [0.0]
+    assert any("window has expired" in warning for warning in result.warnings)
+
+
+@pytest.mark.parametrize("count", [1, 2, 3, 5, 10])
+def test_arbitrary_number_of_absolute_sessions_stays_aligned(count):
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    loads = [
+        DeferrableLoad(
+            subentry_id=f"load-{index}",
+            name=f"Load {index:02}",
+            nominal_power_w=1000 + index,
+            operating_hours=0.5,
+            start_at=now + timedelta(minutes=15 * (index + 1)),
+            end_at=now + timedelta(hours=20),
+        )
+        for index in range(count)
+    ]
+    result = build_payload(_inputs(now=now, time_step_minutes=15, horizon_steps=96, loads=loads))
+    payload = result.payload
+    assert payload["number_of_deferrable_loads"] == count
+    assert len(payload["operating_hours_of_each_deferrable_load"]) == count
+    assert len(payload["start_timesteps_of_each_deferrable_load"]) == count
+    assert payload["start_timesteps_of_each_deferrable_load"] == list(range(1, count + 1))
+
+
+@pytest.mark.usefixtures("stockholm_timezone")
 def test_absolute_window_narrows_a_standing_one_but_never_widens_it():
     """Both are hard constraints, so only their intersection is safe.
 

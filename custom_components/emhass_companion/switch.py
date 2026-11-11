@@ -27,6 +27,9 @@ from .const import (
     ATTR_REQUEST_RUNTIME_SECONDS,
     ATTR_REQUESTED_AT,
     ATTR_SEEN_RUNNING,
+    ATTR_SESSION_END_AT,
+    ATTR_SESSION_ID,
+    ATTR_SESSION_START_AT,
 )
 from .coordinator import EmhassCoordinator
 from .deferrable import DeferrableRuntime
@@ -123,7 +126,16 @@ def _requested_attrs(load: DeferrableRuntime) -> dict[str, Any]:
     """
     deadline = load.deadline_at
     now = dt_util.utcnow()
+    session_progress_hours = load.elapsed_towards_target(now).total_seconds() / 3600
     return {
+        ATTR_SESSION_ID: load.session_id,
+        ATTR_SESSION_START_AT: load.session_start_at.isoformat() if load.session_start_at else None,
+        ATTR_SESSION_END_AT: load.session_end_at.isoformat() if load.session_end_at else None,
+        "session_total_hours": load.operating_hours if load.session_id else None,
+        "session_credited_hours": session_progress_hours if load.session_id else None,
+        "session_remaining_hours": (
+            max(load.operating_hours - session_progress_hours, 0.0) if load.session_id else None
+        ),
         ATTR_REQUESTED_AT: load.requested_at.isoformat() if load.requested_at else None,
         ATTR_DEADLINE_AT: deadline.isoformat() if deadline else None,
         ATTR_REQUEST_RUNTIME_SECONDS: load.request_runtime.total_seconds(),
@@ -141,6 +153,14 @@ def _requested_attrs(load: DeferrableRuntime) -> dict[str, Any]:
 
 
 def _restore_requested(load: DeferrableRuntime, attributes: dict[str, Any]) -> None:
+    if isinstance(session_id := attributes.get(ATTR_SESSION_ID), str):
+        load.session_id = session_id
+    for key, field_name in (
+        (ATTR_SESSION_START_AT, "session_start_at"),
+        (ATTR_SESSION_END_AT, "session_end_at"),
+    ):
+        if (raw := attributes.get(key)) and (parsed := dt_util.parse_datetime(raw)):
+            setattr(load, field_name, parsed)
     # Before the early return: how the *last* run ended outlives the run, and is
     # read precisely when the switch is off -- which is exactly the state this
     # would otherwise skip.

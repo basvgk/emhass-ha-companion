@@ -839,11 +839,15 @@ class Executor:
 
     async def _async_apply_loads(self, decision: Decision) -> None:
         now = decision.at or dt_util.utcnow()
+        controlled: dict[str, list[tuple[DeferrableRuntime, bool]]] = {}
         for subentry_id, should_run in decision.loads.items():
             load = self.coordinator.loads.get(subentry_id)
             if load is None:
                 continue
             if load.is_water_tank and self.coordinator.water_tank_error(load) is not None:
+                continue
+            if load.control_entity:
+                controlled.setdefault(load.control_entity, []).append((load, should_run))
                 continue
             # The commanded clock ticks here and nowhere else: this is the one
             # point at which the decision is known to have been acted on. A
@@ -852,15 +856,35 @@ class Executor:
             # asked of the appliance. A load with no control entity still
             # counts: its own automation follows the same decision through the
             # Should run binary sensor, so the decision is the command.
-            if not load.control_entity:
-                load.observe_command(should_run, now)
-                continue
-            # A controlled one is credited with what the switch was actually
-            # left in, after the call: a turn_on that failed (the plug is
-            # offline) commanded nothing, and crediting it would let an
-            # on-demand run "complete" without the appliance ever starting.
-            running = await self._async_set_load(load, should_run, decision)
-            load.observe_command(running, now)
+            load.observe_command(should_run, now)
+
+        for entity_id, members in controlled.items():
+            requested_on = [(load, run) for load, run in members if run]
+            active_owner = next((load for load, _run in members if load.is_commanded), None)
+            owner = (
+                active_owner
+                if active_owner is not None
+                and any(load is active_owner for load, _ in requested_on)
+                else requested_on[0][0]
+                if requested_on
+                else active_owner or members[0][0]
+            )
+            should_run = bool(requested_on)
+            if len(requested_on) > 1:
+                names = ", ".join(load.name for load, _run in requested_on)
+                message = (
+                    f"Loads {names} requested shared control entity {entity_id}; "
+                    f"only {owner.name} is being commanded"
+                )
+                decision.error = message
+                _LOGGER.error("%s", message)
+            # Exactly one owner writes the shared switch and receives runtime
+            # credit. The existing owner keeps priority during a completion
+            # hold; otherwise the first scheduled load in stable registry order
+            # wins. Other logical requests remain uncredited for this cycle.
+            running = await self._async_set_load(owner, should_run, decision)
+            for load, _requested in members:
+                load.observe_command(running if load is owner else False, now)
 
     async def _async_set_load(
         self, load: DeferrableRuntime, should_run: bool, decision: Decision

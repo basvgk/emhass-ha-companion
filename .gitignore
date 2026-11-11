@@ -28,9 +28,6 @@ site/
 # project content, must never be committed.
 .claude/
 
-# Agent memory (Cursor + Claude Code) -- local only, never public.
-.agents/
-
 # Internal planning docs -- not for the public repo.
 planning/
 
@@ -47,7 +44,3 @@ tools/end_soc_bench/data/
 
 # Solcast forecast cache and SOC history for the PV caution backtest
 tools/pv_caution_bench/data/
-
-# Agent instructions (local only)
-AGENTS.md
-CLAUDE.md

@@ -668,6 +668,9 @@ RECURRENCES: Final = (RECURRENCE_DAILY, RECURRENCE_ON_DEMAND, RECURRENCE_SURPLUS
 # requested_at still the original, now stale, anchor (issue: "deferrable not
 # updating run time").
 ATTR_REQUESTED_AT: Final = "requested_at"
+ATTR_SESSION_ID: Final = "session_id"
+ATTR_SESSION_START_AT: Final = "session_start_at"
+ATTR_SESSION_END_AT: Final = "session_end_at"
 ATTR_DEADLINE_AT: Final = "deadline_at"
 ATTR_REQUEST_RUNTIME_SECONDS: Final = "request_runtime_seconds"
 

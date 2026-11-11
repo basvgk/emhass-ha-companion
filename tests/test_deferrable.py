@@ -60,6 +60,93 @@ def test_running_threshold_has_a_floor():
     assert _load(nominal_power_w=50).running_threshold_w == 10
 
 
+def test_dated_session_upsert_is_idempotent_and_preserves_progress():
+    load = _load(recurrence=RECURRENCE_ON_DEMAND)
+    start = T0 + timedelta(hours=8)
+    end = start + timedelta(hours=12)
+    assert load.upsert_dated_session(
+        session_id="night-1", start_at=start, end_at=end, total_hours=4, now=T0
+    )
+    load.command_runtime = timedelta(hours=1)
+
+    assert load.upsert_dated_session(
+        session_id="night-1",
+        start_at=start + timedelta(hours=1),
+        end_at=end,
+        total_hours=3.5,
+        now=T0 + timedelta(minutes=15),
+    )
+    assert load.command_runtime == timedelta(hours=1)
+    assert load.requested_at == T0
+    assert load.completed_timesteps(T0, 15) == 4
+    assert not load.upsert_dated_session(
+        session_id="night-1",
+        start_at=start + timedelta(hours=1),
+        end_at=end,
+        total_hours=3.5,
+        now=T0 + timedelta(minutes=30),
+    )
+
+
+def test_dated_future_request_does_not_auto_disarm_as_never_started():
+    load = _load(recurrence=RECURRENCE_ON_DEMAND)
+    start = T0 + timedelta(hours=8)
+    load.upsert_dated_session(
+        session_id="future",
+        start_at=start,
+        end_at=start + timedelta(hours=12),
+        total_hours=2,
+        now=T0,
+    )
+    assert not load.check_auto_disarm(T0 + timedelta(hours=7))
+    assert load.requested
+
+
+def test_dated_session_attributes_restore_window_and_progress():
+    from custom_components.emhass_companion.switch import _requested_attrs, _restore_requested
+
+    load = _load(recurrence=RECURRENCE_ON_DEMAND)
+    start = T0 + timedelta(hours=8)
+    load.upsert_dated_session(
+        session_id="restart-me",
+        start_at=start,
+        end_at=start + timedelta(hours=12),
+        total_hours=3,
+        now=T0,
+    )
+    load.command_runtime = timedelta(hours=1, minutes=15)
+    attrs = _requested_attrs(load)
+
+    restored = _load(recurrence=RECURRENCE_ON_DEMAND, requested=True)
+    _restore_requested(restored, attrs)
+
+    assert restored.session_id == "restart-me"
+    assert restored.session_start_at == start
+    assert restored.session_end_at == start + timedelta(hours=12)
+    assert restored.requested_at == T0
+    assert restored.elapsed_commanded(T0) == timedelta(hours=1, minutes=15)
+
+
+def test_active_dated_session_rejects_session_id_rollover():
+    load = _load(recurrence=RECURRENCE_ON_DEMAND)
+    start = T0 + timedelta(hours=8)
+    load.upsert_dated_session(
+        session_id="first",
+        start_at=start,
+        end_at=start + timedelta(hours=12),
+        total_hours=2,
+        now=T0,
+    )
+    with pytest.raises(ValueError, match="cancel the active session"):
+        load.upsert_dated_session(
+            session_id="second",
+            start_at=start,
+            end_at=start + timedelta(hours=12),
+            total_hours=2,
+            now=T0,
+        )
+
+
 def test_power_above_threshold_starts_the_clock():
     load = _load()
     load.observe_power(1900, T0)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC
+import math
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +34,7 @@ SERVICE_EXPORT_SETTINGS = "export_settings"
 SERVICE_TEST_PROFILE = "test_profile"
 SERVICE_TYPICAL_LOAD_FORECAST = "typical_load_forecast"
 SERVICE_SET_HOT_WATER_PLAN = "set_hot_water_plan"
+SERVICE_UPSERT_ON_DEMAND_SESSIONS = "upsert_on_demand_sessions"
 
 TEST_PROFILE_SCHEMA = vol.Schema(
     {
@@ -45,6 +48,23 @@ TYPICAL_LOAD_FORECAST_SCHEMA = vol.Schema(
     {
         vol.Required("day"): cv.date,
         vol.Required("average_w"): vol.All(vol.Coerce(float), vol.Range(min=0)),
+    }
+)
+
+ON_DEMAND_SESSIONS_SCHEMA = vol.Schema(
+    {
+        vol.Required("sessions"): vol.All(
+            [
+                {
+                    vol.Required("device_id"): str,
+                    vol.Required("session_id"): str,
+                    vol.Required("start_at"): str,
+                    vol.Required("end_at"): str,
+                    vol.Required("total_hours"): vol.Coerce(float),
+                }
+            ],
+            vol.Length(min=1),
+        )
     }
 )
 
@@ -117,6 +137,124 @@ def async_register_services(hass: HomeAssistant) -> None:
                             raise ServiceValidationError(str(err)) from err
                         return
         raise ServiceValidationError("Select a hot-water tank device")
+
+    async def _upsert_on_demand_sessions(call: ServiceCall) -> None:
+        """Atomically upsert dated requests for configured on-demand loads."""
+        from homeassistant.helpers import device_registry as dr
+
+        device_registry = dr.async_get(hass)
+        coordinator = _coordinator(hass)
+        validated: list[tuple[Any, str, Any, Any, float]] = []
+        seen_devices: set[str] = set()
+        for item in call.data["sessions"]:
+            device_id = item["device_id"]
+            session_id = item["session_id"].strip()
+            start_at = dt_util.parse_datetime(item["start_at"])
+            end_at = dt_util.parse_datetime(item["end_at"])
+            hours = item["total_hours"]
+            if device_id in seen_devices:
+                raise ServiceValidationError(
+                    "A batch may contain only one session per configured load device"
+                )
+            seen_devices.add(device_id)
+            if not session_id:
+                raise ServiceValidationError("session_id must not be empty")
+            if (
+                start_at is None
+                or end_at is None
+                or start_at.utcoffset() is None
+                or end_at.utcoffset() is None
+            ):
+                raise ServiceValidationError("start_at and end_at must include a UTC offset")
+            start_at = start_at.astimezone(UTC)
+            end_at = end_at.astimezone(UTC)
+            if end_at <= start_at:
+                raise ServiceValidationError("end_at must be later than start_at")
+            if not math.isfinite(hours) or not 0 < hours <= 24:
+                raise ServiceValidationError(
+                    "total_hours must be greater than 0 and no more than 24"
+                )
+
+            device = device_registry.async_get(device_id)
+            selected = None
+            for entry in hass.config_entries.async_loaded_entries(DOMAIN):
+                for load in entry.runtime_data.loads.all():
+                    if (
+                        device is not None
+                        and (
+                            DOMAIN,
+                            f"{entry.entry_id}_{load.subentry_id}",
+                        )
+                        in device.identifiers
+                    ):
+                        selected = load
+                        break
+                if selected is not None:
+                    break
+            if selected is None:
+                raise ServiceValidationError("Select a configured EMHASS Companion load device")
+            if not selected.on_demand:
+                raise ServiceValidationError(f"{selected.name} must be configured as On demand")
+            if selected.session_id != session_id and selected.requested:
+                raise ServiceValidationError(
+                    f"{selected.name} has an active session; cancel it before changing session_id"
+                )
+            validated.append((selected, session_id, start_at, end_at, hours))
+
+        # No state is mutated until every entry has been fully validated.
+        proposed = {row[0].subentry_id: row for row in validated}
+        all_loads = coordinator.loads.all()
+        for load, _session_id, start_at, end_at, _hours in validated:
+            if not load.control_entity:
+                continue
+            for other in all_loads:
+                if other is load or other.control_entity != load.control_entity:
+                    continue
+                if other.subentry_id in proposed:
+                    _other, _sid, other_start, other_end, _target = proposed[other.subentry_id]
+                    overlaps = start_at < other_end and other_start < end_at
+                    if overlaps:
+                        raise ServiceValidationError(
+                            f"{load.name} and {other.name} share control entity "
+                            f"{load.control_entity} and their session windows overlap"
+                        )
+                    continue
+                if not other.enabled:
+                    continue
+                if other.mode != "auto" or other.recurrence == "daily":
+                    raise ServiceValidationError(
+                        f"{load.name} and {other.name} share control entity "
+                        f"{load.control_entity}; only one load may own that actuator"
+                    )
+                if not other.requested:
+                    continue
+                if other.session_id is None or other.session_start_at is None:
+                    raise ServiceValidationError(
+                        f"{load.name} and {other.name} share control entity "
+                        f"{load.control_entity}; cancel the undated request first"
+                    )
+                if other.session_end_at is not None and (
+                    start_at < other.session_end_at and other.session_start_at < end_at
+                ):
+                    raise ServiceValidationError(
+                        f"{load.name} and {other.name} share control entity "
+                        f"{load.control_entity} and their session windows overlap"
+                    )
+
+        now = dt_util.utcnow()
+        changed = False
+        for load, session_id, start_at, end_at, hours in validated:
+            if load.upsert_dated_session(
+                session_id=session_id,
+                start_at=start_at,
+                end_at=end_at,
+                total_hours=hours,
+                now=now,
+            ):
+                changed = True
+                load.notify()
+        if changed:
+            await coordinator.async_request_settings_refresh()
 
     async def _test_profile(call: ServiceCall) -> ServiceResponse:
         """Resolve a profile and return what it produced.
@@ -280,6 +418,12 @@ def async_register_services(hass: HomeAssistant) -> None:
     )
     hass.services.async_register(
         DOMAIN,
+        SERVICE_UPSERT_ON_DEMAND_SESSIONS,
+        _upsert_on_demand_sessions,
+        schema=ON_DEMAND_SESSIONS_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
         SERVICE_TEST_PROFILE,
         _test_profile,
         schema=TEST_PROFILE_SCHEMA,
@@ -304,5 +448,6 @@ def async_unregister_services(hass: HomeAssistant) -> None:
         SERVICE_TEST_PROFILE,
         SERVICE_TYPICAL_LOAD_FORECAST,
         SERVICE_SET_HOT_WATER_PLAN,
+        SERVICE_UPSERT_ON_DEMAND_SESSIONS,
     ):
         hass.services.async_remove(DOMAIN, service)

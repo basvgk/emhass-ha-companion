@@ -141,6 +141,7 @@ class LoadWindow:
     end_index: int
     warnings: list[str] = field(default_factory=list)
     opens_beyond_horizon: bool = False
+    cannot_run: bool = False
 
 
 def resolve_load_window(
@@ -155,6 +156,7 @@ def resolve_load_window(
     operating_steps: int = 0,
     start_at: datetime | None = None,
     end_at: datetime | None = None,
+    hard_start: bool = False,
 ) -> LoadWindow:
     """Combine every kind of "when may this run" into timestep indices.
 
@@ -200,7 +202,7 @@ def resolve_load_window(
     # so the intersection is the only safe reading. Deliberately folded in
     # before the deadline logic below, so a deadline still measures itself
     # against whatever the two windows leave.
-    opens_at_is_hard = False
+    opens_at_is_hard = start_at is not None
     if start_at is not None and (opens_at is None or start_at > opens_at):
         opens_at = start_at
         opens_at_is_hard = True
@@ -246,7 +248,14 @@ def resolve_load_window(
     # only pushes the start out when opens_at is genuinely closer to the next
     # step than this one, which is the case an index is coarse enough to
     # actually get wrong.
-    start_index = 0 if opens_at is None else max(round(elapsed_steps(opens_at)), 0)
+    start_index = (
+        0
+        if opens_at is None
+        else max(
+            math.ceil(elapsed_steps(opens_at)) if hard_start else round(elapsed_steps(opens_at)),
+            0,
+        )
+    )
     opens_beyond_horizon = False
     if start_index >= horizon_steps:
         # EMHASS has no index meaning "not this cycle" -- 0 is "may begin
@@ -266,6 +275,9 @@ def resolve_load_window(
         end_index = 0
     else:
         end_index = math.floor(elapsed_steps(ends_at))
+        if end_at is not None and end_at <= grid_start:
+            warnings.append(f"{name}: its absolute time window has expired; the load is parked.")
+            return LoadWindow(start_index, 0, warnings, cannot_run=True)
         if end_index >= horizon_steps:
             # Beyond the horizon is the same as unconstrained, and saying so
             # keeps EMHASS from clamping a nonsensical index. A deadline that
@@ -316,6 +328,15 @@ def resolve_load_window(
             f"{name}: its allowed window is {end_index - start_index} timesteps but it "
             f"needs {operating_steps}; EMHASS may report the problem as infeasible."
         )
+
+    if end_at is not None and not opens_beyond_horizon:
+        available_steps = (horizon_steps if end_index == 0 else end_index) - start_index
+        if operating_steps > 0 and available_steps < operating_steps:
+            warnings.append(
+                f"{name}: its hard absolute window has {max(available_steps, 0)} timesteps "
+                f"available but needs {operating_steps}; the load is parked for this cycle."
+            )
+            return LoadWindow(start_index, end_index, warnings, cannot_run=True)
 
     return LoadWindow(start_index, max(end_index, 0), warnings, opens_beyond_horizon)
 
@@ -1518,6 +1539,7 @@ def _describe(
         operating_steps=remaining_steps,
         start_at=load.start_at,
         end_at=load.end_at,
+        hard_start=load.hard_start,
     )
     warnings.extend(window.warnings)
 
@@ -1536,7 +1558,7 @@ def _describe(
     # single-constant branch below, which is the same trap reached from the
     # other direction, and _park's own docstring for why a zero-hour load
     # must never also claim to be running.
-    if window.opens_beyond_horizon:
+    if window.opens_beyond_horizon or window.cannot_run:
         return _park(load)
 
     # A single-constant load that is already running gets *pinned* by EMHASS

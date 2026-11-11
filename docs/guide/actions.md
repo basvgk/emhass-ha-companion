@@ -14,6 +14,7 @@ with no user behind it (an automation, a script) is always allowed.
 | [`emhass_companion.run_dayahead`](#run_dayahead) | Rebuilds the plan across the whole horizon | none | anyone |
 | [`emhass_companion.train_load_forecaster`](#train_load_forecaster) | Retrains the machine-learning load forecaster | none | anyone |
 | [`emhass_companion.set_hot_water_plan`](#set_hot_water_plan) | Replaces a hot-water tank's whole plan | `device_id`, `periods` | anyone |
+| [`emhass_companion.upsert_on_demand_sessions`](#upsert_on_demand_sessions) | Creates or updates a batch of dated on-demand requests | `sessions` | anyone |
 | [`emhass_companion.export_settings`](#export_settings) | Saves Companion's static settings into EMHASS | none | administrators |
 | [`emhass_companion.test_profile`](#test_profile) | Shows what a data source profile returns | `profile`, `options`, `limit` | administrators |
 | [`emhass_companion.typical_load_forecast`](#typical_load_forecast) | Builds the *Typical household* forecast | `day`, `average_w` | anyone |
@@ -70,6 +71,45 @@ sensor's recent readings as the forecast until a later attempt succeeds.
 
 Replaces a hot-water tank's whole plan in one step. Fields, example and rules
 are on [Thermal loads](thermal_loads.md#water-tank-with-an-immersion-heater).
+
+## upsert_on_demand_sessions
+
+Submit one or more dated sessions for existing Companion loads configured as
+**On demand**. Every batch is validated before any state changes, then triggers
+one coordinated refresh. Repeating the same `session_id` updates its window or
+total target without clearing credited progress. A different ID requires the
+Requested switch for the previous session to be turned off first. Completed
+IDs remain terminal; use a new ID for the next session. Absolute windows are
+hard UTC instants and take precedence over the load's standing wall-clock
+window and relative `run_within` setting. A window outside the current horizon
+is parked until a later run can see it.
+
+```yaml
+action: emhass_companion.upsert_on_demand_sessions
+data:
+  sessions:
+    - device_id: "<COMPANION_LOAD_DEVICE_ID>"
+      session_id: "vehicle-2026-11-12-morning"
+      start_at: "2026-11-11T18:00:00+01:00"
+      end_at: "2026-11-12T07:00:00+01:00"
+      total_hours: 3.0
+    - device_id: "<ANOTHER_LOAD_DEVICE_ID>"
+      session_id: "dishwasher-2026-11-11"
+      start_at: "2026-11-11T21:00:00+01:00"
+      end_at: "2026-11-12T02:00:00+01:00"
+      total_hours: 1.5
+```
+
+The `sessions` list has no fixed slot count and can target any number of
+configured load devices in one optimization. A given device can occur only
+once per batch, and a load supports one active dated session at a time. Times
+must include an explicit UTC offset. `total_hours` is the total target; when an
+adapter recalculates it, include already credited operation in that total.
+The Requested switch exposes `session_id`, `session_start_at`, `session_end_at`,
+`session_total_hours`, `session_credited_hours` and `session_remaining_hours` as
+state attributes. If two configured loads share one control entity, only one
+load owns its command and progress in a cycle; overlapping dated windows on
+that actuator are rejected by the action.
 
 ## export_settings
 

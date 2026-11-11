@@ -255,6 +255,11 @@ class DeferrableRuntime:
     # see docs/on_demand_loads.md. Entity-owned, like everything else below.
     recurrence: str = RECURRENCE_DAILY
     requested: bool = False
+    # Optional externally scheduled, absolute on-demand request. These fields
+    # belong to the request and are persisted with the Requested switch.
+    session_id: str | None = None
+    session_start_at: datetime | None = None
+    session_end_at: datetime | None = None
 
     # How long after a request the run must be finished. 0 means no deadline,
     # matching EMHASS's own convention that 0 is "unconstrained". Only
@@ -493,7 +498,7 @@ class DeferrableRuntime:
         deadline re-derived on every optimisation would slide forward with the
         clock and never arrive.
         """
-        if not self.on_demand or not self.requested:
+        if not self.on_demand or not self.requested or self.session_id is not None:
             return None
         if self.requested_at is None or self.run_within_hours <= 0:
             return None
@@ -825,6 +830,9 @@ class DeferrableRuntime:
         from the switch would leave a deadline with nothing to count from.
         """
         self.requested = True
+        self.session_id = None
+        self.session_start_at = None
+        self.session_end_at = None
         self.requested_at = now
         self.request_runtime = timedelta()
         # A fresh run is judged on its own evidence. Carrying the previous run's
@@ -835,6 +843,40 @@ class DeferrableRuntime:
         self.commanded_since = now if self.is_commanded else None
         self.seen_running = False
         self.idle_since = None
+
+    def upsert_dated_session(
+        self,
+        *,
+        session_id: str,
+        start_at: datetime,
+        end_at: datetime,
+        total_hours: float,
+        now: datetime,
+    ) -> bool:
+        """Create or update one dated request without resetting its progress."""
+        if self.session_id == session_id:
+            if not self.requested:
+                # A completed/cancelled session ID is terminal and idempotent.
+                return False
+            changed = (
+                self.session_start_at != start_at
+                or self.session_end_at != end_at
+                or self.operating_hours != total_hours
+            )
+            self.session_start_at = start_at
+            self.session_end_at = end_at
+            self.operating_hours = total_hours
+            return changed
+        if self.requested:
+            raise ValueError(
+                f"{self.name}: cancel the active session before replacing its session_id"
+            )
+        self.request(now)
+        self.session_id = session_id
+        self.session_start_at = start_at
+        self.session_end_at = end_at
+        self.operating_hours = total_hours
+        return True
 
     def cancel(self, reason: str = COMPLETION_CANCELLED, now: datetime | None = None) -> None:
         """Clear a request, fulfilled or abandoned, along with its anchor.
@@ -1120,7 +1162,7 @@ class DeferrableRuntime:
         current_temperature: float | None = None,
     ) -> DeferrableLoad:
         """Project the live state into what the payload builder consumes."""
-        windowed = self.use_time_window
+        windowed = self.use_time_window and self.session_id is None
         surplus = self.on_surplus
         budget = self.surplus_budget
         # The ceiling the budget's hours were actually computed against --
@@ -1149,8 +1191,21 @@ class DeferrableRuntime:
             # this plan and means nothing tomorrow. Clamping to it is what keeps
             # EMHASS from placing the hours at 03:00 -- it has no idea they came
             # from sunshine, only that the load must run somewhere.
-            start_at=budget.window_start if surplus else None,
-            end_at=budget.window_end if surplus else None,
+            start_at=(
+                self.session_start_at
+                if self.session_id is not None
+                else budget.window_start
+                if surplus
+                else None
+            ),
+            end_at=(
+                self.session_end_at
+                if self.session_id is not None
+                else budget.window_end
+                if surplus
+                else None
+            ),
+            hard_start=self.session_id is not None,
             # Independent of the window switch: a deadline is a property of one
             # request, the window a standing property of the appliance and the
             # household. Both may apply, and the payload intersects them.

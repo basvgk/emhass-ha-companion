@@ -362,6 +362,7 @@ def test_services_yaml_matches_registered_services(strings):
         SERVICE_TEST_PROFILE,
         SERVICE_TRAIN_LOAD_FORECASTER,
         SERVICE_TYPICAL_LOAD_FORECAST,
+        SERVICE_UPSERT_ON_DEMAND_SESSIONS,
     )
 
     registered = {
@@ -369,6 +370,7 @@ def test_services_yaml_matches_registered_services(strings):
         SERVICE_RUN_DAYAHEAD,
         SERVICE_RUN_MPC,
         SERVICE_SET_HOT_WATER_PLAN,
+        SERVICE_UPSERT_ON_DEMAND_SESSIONS,
         SERVICE_TEST_PROFILE,
         SERVICE_TRAIN_LOAD_FORECASTER,
         SERVICE_TYPICAL_LOAD_FORECAST,

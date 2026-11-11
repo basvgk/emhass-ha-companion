@@ -18,6 +18,13 @@ set_hot_water_plan:
       example: '[{"draw_start": "06:00:00", "draw_end": "08:00:00", "draw_energy_kwh": 3, "enabled": true}]'
       selector:
         object:
+upsert_on_demand_sessions:
+  fields:
+    sessions:
+      required: true
+      example: '[{"device_id": "<LOAD_DEVICE_ID>", "session_id": "night-2026-11-12", "start_at": "2026-11-11T18:00:00+01:00", "end_at": "2026-11-12T07:00:00+01:00", "total_hours": 3.0}]'
+      selector:
+        object:
 
 test_profile:
   fields:

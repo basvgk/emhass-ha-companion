@@ -1441,6 +1441,16 @@
           "description": "1–8 objects with draw_start, draw_end, draw_energy_kwh, and optional name and enabled."
         }
       }
+    },
+    "upsert_on_demand_sessions": {
+      "name": "Schedule on-demand sessions",
+      "description": "Atomically create or update dated requests for configured on-demand loads. Reusing a session_id updates its window and total target without resetting progress.",
+      "fields": {
+        "sessions": {
+          "name": "Sessions",
+          "description": "A variable-length list of unique configured load devices. Each item needs device_id, session_id, offset-aware start_at and end_at, and total_hours. Only one active dated session is supported per load."
+        }
+      }
     }
   },
   "config_subentries": {
