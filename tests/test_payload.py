@@ -210,6 +210,24 @@ def test_expired_absolute_window_is_parked():
     assert any("window has expired" in warning for warning in result.warnings)
 
 
+def test_dated_window_with_less_than_one_step_left_is_parked():
+    now = datetime(2026, 7, 28, 18, 0, tzinfo=UTC)
+    window = resolve_load_window(
+        name="EV",
+        earliest=None,
+        latest=None,
+        deadline=None,
+        grid_start=now,
+        step=timedelta(minutes=15),
+        horizon_steps=96,
+        operating_steps=1,
+        start_at=now - timedelta(hours=1),
+        end_at=now + timedelta(minutes=2),
+        hard_start=True,
+    )
+    assert window.cannot_run
+
+
 @pytest.mark.parametrize("count", [1, 2, 3, 5, 10])
 def test_arbitrary_number_of_absolute_sessions_stays_aligned(count):
     now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)

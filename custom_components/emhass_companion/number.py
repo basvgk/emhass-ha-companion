@@ -228,7 +228,7 @@ LOAD_NUMBERS: tuple[LoadNumberDescription, ...] = (
         # A duration needs an instant to count from, and only a request
         # provides one. On a daily load "within 4 h" of a fixed opening is just
         # a narrower window, which Latest finish already says.
-        available_fn=lambda load: load.on_demand,
+        available_fn=lambda load: load.on_demand and load.recurrence != "dated_on_demand",
         applies_fn=_is_standard,
     ),
     LoadNumberDescription(

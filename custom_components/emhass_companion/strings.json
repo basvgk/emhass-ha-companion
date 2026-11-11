@@ -917,6 +917,7 @@
       "options": {
         "daily": "Every day",
         "on_demand": "On demand",
+        "dated_on_demand": "On demand with date",
         "surplus": "On spare solar"
       }
     },
@@ -942,6 +943,12 @@
   },
   "entity": {
     "sensor": {
+      "active_session_start": {
+        "name": "Active session start"
+      },
+      "active_session_end": {
+        "name": "Active session end"
+      },
       "pv_forecast": {
         "name": "Planned solar production"
       },
@@ -1131,11 +1138,15 @@
         "state": {
           "daily": "Every day",
           "on_demand": "On demand",
+          "dated_on_demand": "On demand with date",
           "surplus": "On spare solar"
         }
       }
     },
     "button": {
+      "apply_dated_session": {
+        "name": "Apply dated session"
+      },
       "run_mpc": {
         "name": "Recalculate now"
       },
@@ -1227,6 +1238,14 @@
       },
       "comfort_penalty": {
         "name": "Comfort penalty"
+      }
+    },
+    "datetime": {
+      "session_draft_start": {
+        "name": "Session start (draft)"
+      },
+      "session_draft_end": {
+        "name": "Session end (draft)"
       }
     },
     "time": {

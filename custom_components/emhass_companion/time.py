@@ -72,7 +72,11 @@ LOAD_TIMES: tuple[LoadTimeDescription, ...] = (
         get_fn=lambda load: load.earliest_start,
         set_fn=_set_earliest,
         fallback=DEFAULT_EARLIEST,
-        available_fn=lambda load: load.use_time_window,
+        available_fn=lambda load: (
+            load.use_time_window
+            and load.recurrence != "dated_on_demand"
+            and not (load.requested and load.session_id)
+        ),
     ),
     LoadTimeDescription(
         key="latest_end",
@@ -81,7 +85,11 @@ LOAD_TIMES: tuple[LoadTimeDescription, ...] = (
         get_fn=lambda load: load.latest_end,
         set_fn=_set_latest,
         fallback=DEFAULT_LATEST,
-        available_fn=lambda load: load.use_time_window,
+        available_fn=lambda load: (
+            load.use_time_window
+            and load.recurrence != "dated_on_demand"
+            and not (load.requested and load.session_id)
+        ),
     ),
     # The comfort window: when the comfort temperature applies, with the
     # setback temperature holding outside it. Always consulted for a thermal

@@ -5,13 +5,17 @@ from __future__ import annotations
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from typing import Any
+from uuid import uuid4
 
 from homeassistant.components.button import ButtonEntity, ButtonEntityDescription
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
+from .const import DOMAIN
 from .coordinator import EmhassCoordinator
 from .deferrable import DeferrableRuntime
 from .entity import EmhassEntity, EmhassLoadEntity
@@ -47,8 +51,54 @@ async def async_setup_entry(
         # so there is no operating_hours for a forced run to disarm against.
         if not load.is_thermal:
             async_add_entities(
-                [LoadRunNowButton(coordinator, load)], config_subentry_id=load.subentry_id
+                [LoadRunNowButton(coordinator, load), ApplyDatedSessionButton(coordinator, load)],
+                config_subentry_id=load.subentry_id,
             )
+
+
+class ApplyDatedSessionButton(EmhassLoadEntity, ButtonEntity):
+    """Apply the two draft datetimes through the same validated service as automations."""
+
+    _attr_translation_key = "apply_dated_session"
+
+    def __init__(self, coordinator, load) -> None:
+        super().__init__(coordinator, load, "apply_dated_session")
+
+    @property
+    def available(self) -> bool:
+        return super().available and self.load.on_demand
+
+    async def async_press(self) -> None:
+        start, end = self.load.session_draft_start, self.load.session_draft_end
+        if start is None or end is None:
+            raise ServiceValidationError("Set both draft session dates before applying")
+        entry = self.coordinator.config_entry
+        device = dr.async_get(self.hass).async_get_device(
+            identifiers={(DOMAIN, f"{entry.entry_id}_{self.load.subentry_id}")}
+        )
+        if device is None:
+            raise ServiceValidationError("Load device not found")
+        session_id = (
+            self.load.session_id
+            if self.load.requested and self.load.session_id
+            else f"manual-{uuid4()}"
+        )
+        await self.hass.services.async_call(
+            DOMAIN,
+            "upsert_on_demand_sessions",
+            {
+                "sessions": [
+                    {
+                        "device_id": device.id,
+                        "session_id": session_id,
+                        "start_at": start.isoformat(),
+                        "end_at": end.isoformat(),
+                        "total_hours": self.load.operating_hours,
+                    }
+                ]
+            },
+            blocking=True,
+        )
 
 
 class EmhassButton(EmhassEntity, ButtonEntity):

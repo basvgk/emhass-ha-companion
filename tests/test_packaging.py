@@ -168,6 +168,7 @@ def test_imported_home_assistant_components_are_declared():
         "button",
         "number",
         "time",
+        "datetime",
     }
     missing = used - declared - platforms
     assert not missing, f"imported but not declared in manifest.json: {missing}"
@@ -977,7 +978,16 @@ def test_cards_look_up_load_entities_by_their_real_translation_keys(bundle):
     strings = _json(COMPONENT / "strings.json")
     published = {
         key
-        for domain in ("binary_sensor", "button", "number", "select", "sensor", "switch", "time")
+        for domain in (
+            "binary_sensor",
+            "button",
+            "datetime",
+            "number",
+            "select",
+            "sensor",
+            "switch",
+            "time",
+        )
         for key in strings.get("entity", {}).get(domain, {})
     }
     assert {"load_enabled", "load_requested"} <= published, "strings.json changed shape"

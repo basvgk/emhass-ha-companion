@@ -917,6 +917,7 @@
       "options": {
         "daily": "Varje dag",
         "on_demand": "Vid behov",
+        "dated_on_demand": "Vid behov med datum",
         "surplus": "På solöverskott"
       }
     },
@@ -942,6 +943,12 @@
   },
   "entity": {
     "sensor": {
+      "active_session_start": {
+        "name": "Aktiv sessionsstart"
+      },
+      "active_session_end": {
+        "name": "Aktivt sessionsslut"
+      },
       "pv_forecast": {
         "name": "Planerad solproduktion"
       },
@@ -1131,11 +1138,15 @@
         "state": {
           "daily": "Varje dag",
           "on_demand": "Vid behov",
+          "dated_on_demand": "Vid behov med datum",
           "surplus": "Solöverskott"
         }
       }
     },
     "button": {
+      "apply_dated_session": {
+        "name": "Tillämpa daterad session"
+      },
       "run_mpc": {
         "name": "Räkna om nu"
       },
@@ -1227,6 +1238,14 @@
       },
       "comfort_penalty": {
         "name": "Komfortstraff"
+      }
+    },
+    "datetime": {
+      "session_draft_start": {
+        "name": "Sessionsstart (utkast)"
+      },
+      "session_draft_end": {
+        "name": "Sessionsslut (utkast)"
       }
     },
     "time": {

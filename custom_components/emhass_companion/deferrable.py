@@ -94,6 +94,7 @@ from .const import (
     LOAD_TYPE_STANDARD,
     LOAD_TYPE_THERMAL,
     RECURRENCE_DAILY,
+    RECURRENCE_DATED,
     RECURRENCE_ON_DEMAND,
     RECURRENCE_SURPLUS,
     RECURRENCES,
@@ -260,6 +261,8 @@ class DeferrableRuntime:
     session_id: str | None = None
     session_start_at: datetime | None = None
     session_end_at: datetime | None = None
+    session_draft_start: datetime | None = None
+    session_draft_end: datetime | None = None
 
     # How long after a request the run must be finished. 0 means no deadline,
     # matching EMHASS's own convention that 0 is "unconstrained". Only
@@ -401,7 +404,7 @@ class DeferrableRuntime:
         which a surplus load does not have. Use :attr:`armable` for the
         question "does the Requested switch mean anything here".
         """
-        return self.recurrence == RECURRENCE_ON_DEMAND
+        return self.recurrence in (RECURRENCE_ON_DEMAND, RECURRENCE_DATED)
 
     @property
     def on_surplus(self) -> bool:
@@ -1162,7 +1165,10 @@ class DeferrableRuntime:
         current_temperature: float | None = None,
     ) -> DeferrableLoad:
         """Project the live state into what the payload builder consumes."""
-        windowed = self.use_time_window and self.session_id is None
+        dated_request = self.on_demand and self.requested and self.session_id is not None
+        windowed = (
+            self.use_time_window and not dated_request and self.recurrence != RECURRENCE_DATED
+        )
         surplus = self.on_surplus
         budget = self.surplus_budget
         # The ceiling the budget's hours were actually computed against --
@@ -1192,20 +1198,12 @@ class DeferrableRuntime:
             # EMHASS from placing the hours at 03:00 -- it has no idea they came
             # from sunshine, only that the load must run somewhere.
             start_at=(
-                self.session_start_at
-                if self.session_id is not None
-                else budget.window_start
-                if surplus
-                else None
+                self.session_start_at if dated_request else budget.window_start if surplus else None
             ),
             end_at=(
-                self.session_end_at
-                if self.session_id is not None
-                else budget.window_end
-                if surplus
-                else None
+                self.session_end_at if dated_request else budget.window_end if surplus else None
             ),
-            hard_start=self.session_id is not None,
+            hard_start=dated_request,
             # Independent of the window switch: a deadline is a property of one
             # request, the window a standing property of the appliance and the
             # household. Both may apply, and the payload intersects them.
@@ -1234,7 +1232,12 @@ class DeferrableRuntime:
             # is: sending zero hours *and* a window and a running state is the
             # kind of contradiction EMHASS answers by declaring the whole
             # problem infeasible.
-            wants_to_run=self.enabled and self.participates and not (surplus and budget.is_empty),
+            wants_to_run=(
+                self.enabled
+                and self.participates
+                and not (surplus and budget.is_empty)
+                and not (self.recurrence == RECURRENCE_DATED and not dated_request)
+            ),
             # A load that is already running should not be charged a startup
             # penalty again, nor be re-scheduled for work it has done today.
             # This is what credits the startup: EMHASS reads the flag straight

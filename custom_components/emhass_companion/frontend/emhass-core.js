@@ -858,7 +858,7 @@ function loadView(hass, load) {
   const hours = find("operating_hours");
 
   const mode = recurrence ? recurrence.state : "daily";
-  const onDemand = mode === "on_demand";
+  const onDemand = mode === "on_demand" || mode === "dated_on_demand";
   const onSurplus = mode === "surplus";
 
   const deadlineRaw =

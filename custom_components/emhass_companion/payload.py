@@ -278,6 +278,11 @@ def resolve_load_window(
         if end_at is not None and end_at <= grid_start:
             warnings.append(f"{name}: its absolute time window has expired; the load is parked.")
             return LoadWindow(start_index, 0, warnings, cannot_run=True)
+        if hard_start and end_at is not None and end_index <= 0:
+            warnings.append(
+                f"{name}: its absolute window has no full timestep left; the load is parked."
+            )
+            return LoadWindow(start_index, 0, warnings, cannot_run=True)
         if end_index >= horizon_steps:
             # Beyond the horizon is the same as unconstrained, and saying so
             # keeps EMHASS from clamping a nonsensical index. A deadline that

@@ -656,8 +656,9 @@ LOAD_MODE_FORCE_ON: Final = "force_on"
 # rather than configured, and the entities backing them report unavailable.
 RECURRENCE_DAILY: Final = "daily"
 RECURRENCE_ON_DEMAND: Final = "on_demand"
+RECURRENCE_DATED: Final = "dated_on_demand"
 RECURRENCE_SURPLUS: Final = "surplus"
-RECURRENCES: Final = (RECURRENCE_DAILY, RECURRENCE_ON_DEMAND, RECURRENCE_SURPLUS)
+RECURRENCES: Final = (RECURRENCE_DAILY, RECURRENCE_ON_DEMAND, RECURRENCE_SURPLUS, RECURRENCE_DATED)
 
 # Attributes of the Requested switch. requested_at is the instant a deadline
 # counts from, and is carried here rather than in an entity of its own so the

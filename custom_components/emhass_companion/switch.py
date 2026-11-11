@@ -11,6 +11,7 @@ from homeassistant.components.switch import SwitchEntity, SwitchEntityDescriptio
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_OFF, STATE_ON, EntityCategory
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.util import dt as dt_util
@@ -214,7 +215,11 @@ LOAD_SWITCHES: tuple[LoadSwitchDescription, ...] = (
         # A surplus load's window is the sun's, derived fresh from every plan.
         # A standing wall-clock one is not narrowed by it, it is simply never
         # read, so offering the switch would be a lie.
-        available_fn=lambda load: not load.on_surplus,
+        available_fn=lambda load: (
+            not load.on_surplus
+            and load.recurrence != "dated_on_demand"
+            and not (load.requested and load.session_id)
+        ),
     ),
     # Both of these change what EMHASS is asked to solve rather than how the
     # answer is applied, so they belong to the load's live state: a car that
@@ -450,6 +455,12 @@ class LoadSwitch(EmhassLoadEntity, SwitchEntity, RestoreEntity):
         await self._set(False)
 
     async def _set(self, value: bool) -> None:
+        if (
+            self.entity_description.key == "requested"
+            and value
+            and self.load.recurrence == "dated_on_demand"
+        ):
+            raise ServiceValidationError("Use Apply dated session to start a dated request")
         was_enabled = self.load.enabled
         self.entity_description.set_fn(self.load, value)
         if self.entity_description.invalidates_battery_lockout:

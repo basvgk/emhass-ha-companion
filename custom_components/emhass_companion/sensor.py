@@ -446,7 +446,28 @@ async def async_setup_entry(
             # long after setup; the sensor is created for every standard load
             # and reports unavailable until it is one.
             entities.append(LoadSurplusBudgetSensor(coordinator, load))
+            entities.extend(
+                ActiveSessionWindowSensor(coordinator, load, start) for start in (True, False)
+            )
         async_add_entities(entities, config_subentry_id=load.subentry_id)
+
+
+class ActiveSessionWindowSensor(EmhassLoadEntity, SensorEntity):
+    """The actual window used by the active dated request."""
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+
+    def __init__(self, coordinator, load, start: bool) -> None:
+        self._field = "session_start_at" if start else "session_end_at"
+        key = "active_session_start" if start else "active_session_end"
+        super().__init__(coordinator, load, key)
+        self._attr_translation_key = key
+
+    @property
+    def native_value(self):
+        if not self.load.requested or self.load.session_id is None:
+            return None
+        return getattr(self.load, self._field)
 
 
 class EmhassSensor(EmhassEntity, SensorEntity):

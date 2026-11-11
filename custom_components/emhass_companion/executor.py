@@ -652,6 +652,20 @@ class Executor:
         now = dt_util.utcnow()
         decisions: dict[str, bool] = {}
         for load in self.coordinator.loads.all():
+            if load.recurrence == "dated_on_demand" and load.session_id is None:
+                decisions[load.subentry_id] = False
+                continue
+            if (
+                load.requested
+                and load.session_id is not None
+                and (
+                    load.session_start_at is None
+                    or load.session_end_at is None
+                    or not load.session_start_at <= now < load.session_end_at
+                )
+            ):
+                decisions[load.subentry_id] = False
+                continue
             if not load.enabled:
                 # Parked, not abandoned: the same answer its Should run sensor
                 # gives (off, unless forced on). Skipping it instead left an

@@ -80,6 +80,7 @@ _REMOVED_BUTTON_KEYS = ("run_dayahead", "run_forecast_fit", "export_settings")
 PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
     Platform.BUTTON,
+    Platform.DATETIME,
     Platform.NUMBER,
     Platform.SELECT,
     Platform.SENSOR,

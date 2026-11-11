@@ -1460,8 +1460,6 @@ def deferrable_schema(
                         mode="box",
                     )
                 ),
-                _optional_blank(CONF_EARLIEST_START, defaults): selector.TimeSelector(),
-                _optional_blank(CONF_LATEST_END, defaults): selector.TimeSelector(),
                 vol.Required(
                     CONF_SINGLE_CONSTANT, default=defaults.get(CONF_SINGLE_CONSTANT, False)
                 ): selector.BooleanSelector(),
@@ -1491,6 +1489,10 @@ def deferrable_schema(
                 ),
             }
         )
+
+    if initial and recurrence not in (RECURRENCE_SURPLUS, "dated_on_demand"):
+        schema[_optional_blank(CONF_EARLIEST_START, defaults)] = selector.TimeSelector()
+        schema[_optional_blank(CONF_LATEST_END, defaults)] = selector.TimeSelector()
 
     schema.update(
         {

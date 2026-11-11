@@ -74,6 +74,14 @@ are on [Thermal loads](thermal_loads.md#water-tank-with-an-immersion-heater).
 
 ## upsert_on_demand_sessions
 
+For manual setup, choose **On demand with date** as the load's recurrence.
+Set **Session start (draft)** and **Session end (draft)** on the load, set
+its required operating hours, then press **Apply dated session**. The draft
+fields do not alter the active request until the button is pressed. **Active
+session start** and **Active session end** show the window currently used by
+the optimiser. Applying edits to the same active session preserves progress.
+Turn off Requested to cancel it before starting a different session.
+
 Submit one or more dated sessions for existing Companion loads configured as
 **On demand**. Every batch is validated before any state changes, then triggers
 one coordinated refresh. Repeating the same `session_id` updates its window or

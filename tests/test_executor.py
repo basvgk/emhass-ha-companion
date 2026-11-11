@@ -7,9 +7,9 @@ object, guarantees regardless of how it was produced.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -101,3 +101,24 @@ async def test_existing_shared_actuator_owner_keeps_priority_during_handover():
     executor._async_set_load.assert_awaited_once_with(second, True, decision)
     assert second.is_commanded
     assert not first.is_commanded
+
+
+def test_dated_session_executor_stops_at_window_end_even_with_stale_plan():
+    load = DeferrableRuntime(
+        subentry_id="load",
+        name="EV",
+        requested=True,
+        session_id="session",
+        session_start_at=T0,
+        session_end_at=T0 + timedelta(hours=1),
+    )
+    executor = Executor.__new__(Executor)
+    executor.coordinator = SimpleNamespace(
+        loads=SimpleNamespace(all=lambda: [load]), config=SimpleNamespace(time_step_minutes=15)
+    )
+    executor._scheduled = lambda _load: True
+    with patch(
+        "custom_components.emhass_companion.executor.dt_util.utcnow",
+        return_value=T0 + timedelta(hours=1),
+    ):
+        assert executor._decide_loads(use_plan=True) == {"load": False}

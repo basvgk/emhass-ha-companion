@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -137,3 +138,58 @@ async def test_same_session_update_keeps_request_anchor_and_progress(hass):
     assert load.command_runtime == timedelta(minutes=30)
     assert load.operating_hours == 2.5
     assert load.session_start_at == datetime(2026, 11, 11, 18, 0, tzinfo=UTC)
+
+
+async def test_user_sets_and_updates_dated_session_with_entities(hass):
+    entry, _coordinator, _devices = await _setup_loads(hass, 1)
+    load = entry.runtime_data.loads.all()[0]
+    registry = er.async_get(hass)
+
+    def entity(domain, suffix):
+        return registry.async_get_entity_id(
+            domain, DOMAIN, f"{entry.entry_id}_{load.subentry_id}_{suffix}"
+        )
+
+    await hass.services.async_call(
+        "select",
+        "select_option",
+        {"entity_id": entity("select", "recurrence"), "option": "dated_on_demand"},
+        blocking=True,
+    )
+    for suffix, value in (
+        ("session_draft_start", "2027-03-27T18:00:00+01:00"),
+        ("session_draft_end", "2027-03-28T07:00:00+02:00"),
+    ):
+        await hass.services.async_call(
+            "datetime",
+            "set_value",
+            {"entity_id": entity("datetime", suffix), "datetime": value},
+            blocking=True,
+        )
+    assert not load.requested
+    await hass.services.async_call(
+        "button", "press", {"entity_id": entity("button", "apply_dated_session")}, blocking=True
+    )
+    assert load.requested
+    assert load.session_start_at == datetime(2027, 3, 27, 17, tzinfo=UTC)
+    assert load.session_end_at == datetime(2027, 3, 28, 5, tzinfo=UTC)
+    active = hass.states.get(entity("sensor", "active_session_start"))
+    assert datetime.fromisoformat(active.state) == load.session_start_at
+    original_id = load.session_id
+    load.command_runtime = timedelta(minutes=30)
+    await hass.services.async_call(
+        "datetime",
+        "set_value",
+        {
+            "entity_id": entity("datetime", "session_draft_start"),
+            "datetime": "2027-03-27T19:00:00+01:00",
+        },
+        blocking=True,
+    )
+    assert load.session_start_at == datetime(2027, 3, 27, 17, tzinfo=UTC)
+    await hass.services.async_call(
+        "button", "press", {"entity_id": entity("button", "apply_dated_session")}, blocking=True
+    )
+    assert load.session_id == original_id
+    assert load.command_runtime == timedelta(minutes=30)
+    assert load.session_start_at == datetime(2027, 3, 27, 18, tzinfo=UTC)

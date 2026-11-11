@@ -471,7 +471,7 @@ class EmhassDeferrableCard extends HTMLElement {
     // load's own device page.
     let wanted = ["run_now"];
     if (onDemand) {
-      wanted = ["run_now", "load_requested", "run_within"];
+      wanted = ["run_now", "load_requested", "run_within", "active_session_start", "active_session_end", "session_draft_start", "session_draft_end", "apply_dated_session"];
     } else if (onSurplus) {
       wanted = ["run_now", "load_requested", "energy_needed"];
     }
