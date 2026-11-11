@@ -102,6 +102,17 @@ def test_dated_future_request_does_not_auto_disarm_as_never_started():
     assert load.requested
 
 
+def test_planning_part_of_session_does_not_mark_full_target_completed():
+    load = _load(recurrence=RECURRENCE_ON_DEMAND)
+    load.upsert_dated_session(
+        session_id="ev", start_at=T0, end_at=T0 + timedelta(hours=12), total_hours=6, now=T0
+    )
+    load.command_runtime = timedelta(hours=5, minutes=30)
+    assert not load.check_auto_disarm(T0 + timedelta(hours=5, minutes=30), 15)
+    assert load.requested
+    assert load.operating_hours == 6
+
+
 def test_dated_session_attributes_restore_window_and_progress():
     from custom_components.emhass_companion.switch import _requested_attrs, _restore_requested
 

@@ -142,6 +142,7 @@ class LoadWindow:
     warnings: list[str] = field(default_factory=list)
     opens_beyond_horizon: bool = False
     cannot_run: bool = False
+    available_steps: int | None = None
 
 
 def resolve_load_window(
@@ -157,6 +158,7 @@ def resolve_load_window(
     start_at: datetime | None = None,
     end_at: datetime | None = None,
     hard_start: bool = False,
+    allow_partial: bool = False,
 ) -> LoadWindow:
     """Combine every kind of "when may this run" into timestep indices.
 
@@ -258,6 +260,14 @@ def resolve_load_window(
     )
     opens_beyond_horizon = False
     if start_index >= horizon_steps:
+        if hard_start and end_at is not None:
+            full_window_steps = max(math.floor(elapsed_steps(end_at)) - start_index, 0)
+            if operating_steps > full_window_steps:
+                outcome = "partial planning is enabled" if allow_partial else "the load is parked"
+                warnings.append(
+                    f"{name}: the remaining demand cannot fit in its absolute window "
+                    f"({operating_steps} steps needed, {full_window_steps} available); {outcome}."
+                )
         # EMHASS has no index meaning "not this cycle" -- 0 is "may begin
         # immediately", the opposite of what a window that hasn't opened yet
         # needs to say. Clamping to 0 would tell EMHASS the load is free to
@@ -318,6 +328,7 @@ def resolve_load_window(
         and operating_steps > 0
         and end_index > 0
         and not end_is_deadline
+        and not hard_start
         and end_index - start_index < operating_steps
     ):
         # A standing time window too narrow for the run. Unlike a deadline this
@@ -336,6 +347,19 @@ def resolve_load_window(
 
     if end_at is not None and not opens_beyond_horizon:
         available_steps = (horizon_steps if end_index == 0 else end_index) - start_index
+        if hard_start:
+            full_window_steps = max(math.floor(elapsed_steps(end_at)) - start_index, 0)
+            if operating_steps > full_window_steps:
+                outcome = "partial planning is enabled" if allow_partial else "the load is parked"
+                warnings.append(
+                    f"{name}: the remaining demand cannot fit in its absolute window "
+                    f"({operating_steps} steps needed, {full_window_steps} available); {outcome}."
+                )
+                if not allow_partial:
+                    return LoadWindow(start_index, end_index, warnings, cannot_run=True)
+            return LoadWindow(
+                start_index, end_index, warnings, available_steps=max(available_steps, 0)
+            )
         if operating_steps > 0 and available_steps < operating_steps:
             warnings.append(
                 f"{name}: its hard absolute window has {max(available_steps, 0)} timesteps "
@@ -597,6 +621,7 @@ class PayloadResult:
 
     payload: dict[str, Any]
     warnings: list[str] = field(default_factory=list)
+    load_warnings: dict[str, list[str]] = field(default_factory=dict)
     load_order: list[str] = field(default_factory=list)
     """Subentry ids in the order they map to EMHASS's ``P_deferrable{k}``."""
     extra_rows: list[ExtraRow] = field(default_factory=list)
@@ -1319,7 +1344,9 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
             payload["capacity_cost_per_kw"] = 0.0
     else:
         payload["capacity_cost_per_kw"] = inputs.flat_demand_charge_per_kw
-    deferrable, load_order, deferrable_warnings, extra_rows = _deferrable_settings(inputs, step)
+    deferrable, load_order, deferrable_warnings, extra_rows, load_warnings = _deferrable_settings(
+        inputs, step
+    )
     row_count = len(load_order) + len(extra_rows)
     payload.update(deferrable)
     payload["is_electric_load"] = [True] * row_count
@@ -1360,6 +1387,7 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
     return PayloadResult(
         payload=payload,
         warnings=warnings,
+        load_warnings=load_warnings,
         load_order=load_order,
         extra_rows=extra_rows,
         tank_shortfalls=tank_shortfalls,
@@ -1545,6 +1573,7 @@ def _describe(
         start_at=load.start_at,
         end_at=load.end_at,
         hard_start=load.hard_start,
+        allow_partial=load.allow_partial_session,
     )
     warnings.extend(window.warnings)
 
@@ -1565,6 +1594,15 @@ def _describe(
     # must never also claim to be running.
     if window.opens_beyond_horizon or window.cannot_run:
         return _park(load)
+
+    if window.available_steps is not None and window.available_steps < remaining_steps:
+        if window.available_steps == 0:
+            return _park(load)
+        # EMHASS subtracts completed steps from the total we send. Cap only
+        # the amount requested in this horizon, retaining the original target
+        # and credited progress in the live runtime for the next MPC run.
+        steps = load.completed_timesteps + window.available_steps
+        quantised = steps * inputs.time_step_minutes / 60
 
     # A single-constant load that is already running gets *pinned* by EMHASS
     # the moment it has any operating requirement at all: an unbroken block
@@ -1632,19 +1670,25 @@ def _describe(
 
 def _deferrable_settings(
     inputs: PayloadInputs, step: timedelta
-) -> tuple[dict[str, Any], list[str], list[str], list[ExtraRow]]:
+) -> tuple[dict[str, Any], list[str], list[str], list[ExtraRow], dict[str, list[str]]]:
     # Every configured load, always, in the registry's stable order: a load's
     # deferrable number is meant to be as durable as the load itself.
     loads = list(inputs.loads)
     if not loads:
-        return {"number_of_deferrable_loads": 0}, [], [], []
+        return {"number_of_deferrable_loads": 0}, [], [], [], {}
 
     warnings: list[str] = []
     loads = [_without_credit_for_later_day(load, inputs, step) for load in loads]
-    real = [
-        _describe(load, inputs, step, warnings) if load.wants_to_run else _park(load)
-        for load in loads
-    ]
+    real = []
+    load_warnings = {}
+    for load in loads:
+        individual_warnings: list[str] = []
+        real.append(
+            _describe(load, inputs, step, individual_warnings) if load.wants_to_run else _park(load)
+        )
+        if individual_warnings:
+            load_warnings[load.subentry_id] = individual_warnings
+            warnings.extend(individual_warnings)
     # Rows for later windows of daily loads go after every real load, so no real
     # load's P_deferrable{k} ever moves. Ordered by occurrence, then by load.
     extras = _extra_window_rows(loads, inputs, step)
@@ -1700,7 +1744,7 @@ def _deferrable_settings(
             row.timesteps for row in described
         ]
 
-    return settings, [load.subentry_id for load in loads], warnings, extra_rows
+    return settings, [load.subentry_id for load in loads], warnings, extra_rows, load_warnings
 
 
 def _without_credit_for_later_day(

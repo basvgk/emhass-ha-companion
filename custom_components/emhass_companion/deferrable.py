@@ -263,6 +263,7 @@ class DeferrableRuntime:
     session_end_at: datetime | None = None
     session_draft_start: datetime | None = None
     session_draft_end: datetime | None = None
+    allow_partial_session: bool = False
 
     # How long after a request the run must be finished. 0 means no deadline,
     # matching EMHASS's own convention that 0 is "unconstrained". Only
@@ -1204,6 +1205,7 @@ class DeferrableRuntime:
                 self.session_end_at if dated_request else budget.window_end if surplus else None
             ),
             hard_start=dated_request,
+            allow_partial_session=self.allow_partial_session if dated_request else False,
             # Independent of the window switch: a deadline is a property of one
             # request, the window a standing property of the appliance and the
             # household. Both may apply, and the payload intersects them.

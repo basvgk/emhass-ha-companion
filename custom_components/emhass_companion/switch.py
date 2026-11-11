@@ -76,6 +76,10 @@ def _set_use_window(load: DeferrableRuntime, value: bool) -> None:
     load.use_time_window = value
 
 
+def _set_allow_partial_session(load: DeferrableRuntime, value: bool) -> None:
+    load.allow_partial_session = value
+
+
 def _set_semi_continuous(load: DeferrableRuntime, value: bool) -> None:
     load.semi_continuous = value
 
@@ -197,6 +201,16 @@ def _restore_requested(load: DeferrableRuntime, attributes: dict[str, Any]) -> N
 
 
 LOAD_SWITCHES: tuple[LoadSwitchDescription, ...] = (
+    LoadSwitchDescription(
+        key="allow_partial_session",
+        translation_key="allow_partial_session",
+        entity_category=EntityCategory.CONFIG,
+        get_fn=lambda load: load.allow_partial_session,
+        set_fn=_set_allow_partial_session,
+        default=False,
+        applies_fn=lambda load: not load.is_thermal,
+        available_fn=lambda load: load.on_demand,
+    ),
     LoadSwitchDescription(
         key="enabled",
         translation_key="load_enabled",

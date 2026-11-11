@@ -13,6 +13,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.emhass_companion.api import EmhassClient
 from custom_components.emhass_companion.const import DOMAIN
+from custom_components.emhass_companion.coordinator import EmhassData
 from custom_components.emhass_companion.models import LastRun
 
 
@@ -193,3 +194,29 @@ async def test_user_sets_and_updates_dated_session_with_entities(hass):
     assert load.session_id == original_id
     assert load.command_runtime == timedelta(minutes=30)
     assert load.session_start_at == datetime(2027, 3, 27, 18, tzinfo=UTC)
+
+
+async def test_partial_planning_switch_and_problem_sensor(hass):
+    entry, coordinator, devices = await _setup_loads(hass, 1)
+    load = entry.runtime_data.loads.all()[0]
+    registry = er.async_get(hass)
+    switch = registry.async_get_entity_id(
+        "switch", DOMAIN, f"{entry.entry_id}_{load.subentry_id}_allow_partial_session"
+    )
+    problem = registry.async_get_entity_id(
+        "binary_sensor", DOMAIN, f"{entry.entry_id}_{load.subentry_id}_load_planning_problem"
+    )
+    assert hass.states.get(switch).state == "off"
+    await hass.services.async_call("switch", "turn_on", {"entity_id": switch}, blocking=True)
+    row = _session(next(iter(devices.values())), 1)
+    await hass.services.async_call(
+        DOMAIN, "upsert_on_demand_sessions", {"sessions": [row]}, blocking=True
+    )
+    assert load.to_load(datetime(2026, 11, 11, 17, tzinfo=UTC), 15).allow_partial_session
+    warning = "Load 0: the remaining demand cannot fit in its absolute window"
+    coordinator.async_set_updated_data(EmhassData(load_warnings={load.subentry_id: [warning]}))
+    assert hass.states.get(problem).state == "on"
+    assert hass.states.get(problem).attributes["warnings"] == [warning]
+    load.cancel()
+    load.notify()
+    assert hass.states.get(problem).state == "off"

@@ -1085,6 +1085,9 @@
       },
       "phase_guard_active": {
         "name": "Fasvakt aktiv"
+      },
+      "load_planning_problem": {
+        "name": "Problem med sessionsplanering"
       }
     },
     "switch": {
@@ -1114,6 +1117,9 @@
       },
       "hot_water_period_enabled": {
         "name": "Varmvattenperiod {period}"
+      },
+      "allow_partial_session": {
+        "name": "Planera delvis vid tidsbrist"
       }
     },
     "select": {

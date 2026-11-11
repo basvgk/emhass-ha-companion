@@ -393,6 +393,7 @@ class EmhassData:
     load_forecast: Series = field(default_factory=Series.empty)
     payload: dict[str, Any] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
+    load_warnings: dict[str, list[str]] = field(default_factory=dict)
     defaulted_forecast_methods: frozenset[str] = frozenset()
     load_order: list[str] = field(default_factory=list)
     payload_order: list[str] = field(default_factory=list)
@@ -1542,6 +1543,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             load_forecast=inputs.load or Series.empty(),
             payload=built.payload,
             warnings=built.warnings,
+            load_warnings=built.load_warnings,
             defaulted_forecast_methods=built.defaulted_forecast_methods,
             load_order=load_order,
             payload_order=built.load_order,

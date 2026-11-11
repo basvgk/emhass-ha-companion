@@ -119,6 +119,15 @@ state attributes. If two configured loads share one control entity, only one
 load owns its command and progress in a cycle; overlapping dated windows on
 that actuator are rejected by the action.
 
+When a dated window extends past the planning horizon, Companion sends the
+part of the remaining demand that fits within this horizon; the total target
+and completed progress are retained for later replans. If the remaining demand
+cannot fit even before the actual session end, the load is parked and its
+**Session planning problem** entity shows the warning. Turn on **Plan partially
+when time is insufficient** to schedule the available time instead. The
+warning remains visible because this cannot meet the complete target. Neither
+setting permits operation outside the dated window.
+
 ## export_settings
 
 *Administrators only.* Saves Companion's static settings into EMHASS's own

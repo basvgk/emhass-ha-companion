@@ -1085,6 +1085,9 @@
       },
       "phase_guard_active": {
         "name": "Phase guard active"
+      },
+      "load_planning_problem": {
+        "name": "Session planning problem"
       }
     },
     "switch": {
@@ -1114,6 +1117,9 @@
       },
       "hot_water_period_enabled": {
         "name": "Hot-water period {period}"
+      },
+      "allow_partial_session": {
+        "name": "Plan partially when time is insufficient"
       }
     },
     "select": {

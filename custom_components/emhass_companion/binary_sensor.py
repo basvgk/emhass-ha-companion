@@ -43,8 +43,43 @@ async def async_setup_entry(
             [
                 LoadShouldRunBinarySensor(coordinator, load),
                 LoadRunningBinarySensor(coordinator, load),
+                LoadPlanningProblemBinarySensor(coordinator, load),
             ],
             config_subentry_id=load.subentry_id,
+        )
+
+
+class LoadPlanningProblemBinarySensor(EmhassLoadEntity, BinarySensorEntity):
+    """Expose window problems on the affected load device."""
+
+    _attr_translation_key = "load_planning_problem"
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+
+    def __init__(self, coordinator, load) -> None:
+        super().__init__(coordinator, load, "load_planning_problem")
+
+    @property
+    def available(self) -> bool:
+        return super().available and self.load.on_demand and self.coordinator.data is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        data = self.coordinator.data
+        warnings = (
+            data.load_warnings.get(self.load.subentry_id, [])
+            if data and self.load.requested and self.load.session_id is not None
+            else []
+        )
+        return {"warnings": warnings}
+
+    @property
+    def is_on(self) -> bool:
+        warnings = self.extra_state_attributes["warnings"]
+        return any(
+            "cannot fit" in warning
+            or "window has expired" in warning
+            or "no full timestep" in warning
+            for warning in warnings
         )
 
 

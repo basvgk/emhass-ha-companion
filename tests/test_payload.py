@@ -228,6 +228,107 @@ def test_dated_window_with_less_than_one_step_left_is_parked():
     assert window.cannot_run
 
 
+@pytest.mark.parametrize(("requested_hours", "expected_hours"), [(5, 5), (6, 5.5)])
+def test_dated_session_partially_in_horizon_is_planned_without_insufficient_window_error(
+    requested_hours, expected_hours
+):
+    now = datetime(2026, 7, 28, 21, 30, tzinfo=UTC)
+    load = DeferrableLoad(
+        subentry_id="ev",
+        name="EV",
+        nominal_power_w=2130,
+        operating_hours=requested_hours,
+        start_at=datetime(2026, 7, 29, 16, 0, tzinfo=UTC),
+        end_at=datetime(2026, 7, 30, 7, 0, tzinfo=UTC),
+        hard_start=True,
+    )
+    result = build_payload(_inputs(now=now, time_step_minutes=15, horizon_steps=96, loads=[load]))
+    assert result.payload["start_timesteps_of_each_deferrable_load"] == [74]
+    assert result.payload["end_timesteps_of_each_deferrable_load"] == [0]
+    assert result.payload["operating_hours_of_each_deferrable_load"] == [expected_hours]
+    assert result.payload["operating_timesteps_of_each_deferrable_load"] == [
+        int(expected_hours * 4)
+    ]
+    assert not result.load_warnings.get("ev")
+
+
+@pytest.mark.parametrize("allow_partial", [False, True])
+def test_dated_session_too_short_reports_problem_and_only_runs_when_enabled(allow_partial):
+    now = datetime(2026, 7, 28, 10, tzinfo=UTC)
+    load = DeferrableLoad(
+        subentry_id="ev",
+        name="EV",
+        nominal_power_w=2130,
+        operating_hours=6,
+        start_at=now + timedelta(hours=1),
+        end_at=now + timedelta(hours=3),
+        hard_start=True,
+        allow_partial_session=allow_partial,
+    )
+    result = build_payload(_inputs(now=now, time_step_minutes=15, horizon_steps=96, loads=[load]))
+    assert result.payload["operating_hours_of_each_deferrable_load"] == [2 if allow_partial else 0]
+    assert any("cannot fit" in warning for warning in result.load_warnings["ev"])
+    if allow_partial:
+        assert result.payload["start_timesteps_of_each_deferrable_load"] == [4]
+        assert result.payload["end_timesteps_of_each_deferrable_load"] == [12]
+
+
+def test_partial_horizon_target_includes_completed_progress_without_resetting_it():
+    now = datetime(2026, 7, 28, 21, 30, tzinfo=UTC)
+    load = DeferrableLoad(
+        subentry_id="ev",
+        name="EV",
+        nominal_power_w=2130,
+        operating_hours=8,
+        completed_timesteps=4,
+        start_at=now + timedelta(hours=18, minutes=30),
+        end_at=now + timedelta(hours=30),
+        hard_start=True,
+    )
+    result = build_payload(_inputs(now=now, time_step_minutes=15, horizon_steps=96, loads=[load]))
+    assert result.payload["operating_timesteps_of_each_deferrable_load"] == [26]
+    assert result.payload["def_current_operating_timesteps"] == [4]
+    assert load.operating_hours == 8
+
+
+def test_partial_horizon_expands_across_replans_without_changing_session_target():
+    start = datetime(2026, 7, 29, 16, tzinfo=UTC)
+    load = DeferrableLoad(
+        subentry_id="ev",
+        name="EV",
+        nominal_power_w=2130,
+        operating_hours=6,
+        start_at=start,
+        end_at=start + timedelta(hours=15),
+        hard_start=True,
+    )
+    initial = datetime(2026, 7, 28, 21, 30, tzinfo=UTC)
+    for index, expected in enumerate((22, 23, 24)):
+        now = initial + timedelta(minutes=15 * index)
+        result = build_payload(
+            _inputs(now=now, time_step_minutes=15, horizon_steps=96, loads=[load])
+        )
+        assert result.payload["operating_timesteps_of_each_deferrable_load"] == [expected]
+        assert load.operating_hours == 6
+        assert not result.load_warnings.get("ev")
+
+
+def test_infeasible_session_beyond_horizon_already_reports_problem():
+    now = datetime(2026, 7, 28, 10, tzinfo=UTC)
+    load = DeferrableLoad(
+        subentry_id="ev",
+        name="EV",
+        nominal_power_w=2130,
+        operating_hours=6,
+        start_at=now + timedelta(hours=48),
+        end_at=now + timedelta(hours=50),
+        hard_start=True,
+    )
+    result = build_payload(_inputs(now=now, time_step_minutes=15, horizon_steps=96, loads=[load]))
+    assert result.payload["operating_hours_of_each_deferrable_load"] == [0]
+    assert any("cannot fit" in warning for warning in result.load_warnings["ev"])
+
+
 @pytest.mark.parametrize("count", [1, 2, 3, 5, 10])
 def test_arbitrary_number_of_absolute_sessions_stays_aligned(count):
     now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
